@@ -1,5 +1,5 @@
 use core::{
-    ptr,
+    cmp, ptr,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -98,6 +98,49 @@ impl Channel {
         let read = || self.read.load(Ordering::Relaxed);
         let write = || self.write.load(Ordering::Relaxed);
         while read() != write() {}
+    }
+
+    // Reads data from the channel buffer into `buf`
+    //
+    // Returns the number of bytes read. If a host is connected, this method always returns 0.
+    // If two or more threads call `read` simultaneously, at least one will perform a valid read while the others may
+    // return 0.
+    pub fn read(&self, buf: &mut [u8]) -> usize {
+        if self.host_is_connected() {
+            return 0;
+        }
+
+        let read = self.read.load(Ordering::Relaxed);
+        let write = self.write.load(Ordering::Relaxed);
+
+        let len = match read.cmp(&write) {
+            cmp::Ordering::Equal => 0,
+            cmp::Ordering::Less => write - read,
+            cmp::Ordering::Greater => (BUF_SIZE - read) + write,
+        };
+
+        let len = len.min(buf.len());
+        let new_read = if read + len > BUF_SIZE {
+            // split memcpy
+            let pivot = BUF_SIZE - read;
+            unsafe { ptr::copy_nonoverlapping(self.buffer.add(read), buf.as_mut_ptr(), pivot) };
+            unsafe {
+                ptr::copy_nonoverlapping(self.buffer, buf.as_mut_ptr().add(pivot), len - pivot)
+            };
+            len - pivot
+        } else {
+            // single memcpy
+            unsafe { ptr::copy_nonoverlapping(self.buffer.add(read), buf.as_mut_ptr(), len) };
+            (read + len) % BUF_SIZE
+        };
+
+        match self
+            .read
+            .compare_exchange(read, new_read, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => len,
+            Err(_) => 0,
+        }
     }
 
     fn host_is_connected(&self) -> bool {

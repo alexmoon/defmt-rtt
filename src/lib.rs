@@ -41,12 +41,19 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use crate::{channel::Channel, consts::BUF_SIZE};
 
 #[defmt::global_logger]
-struct Logger;
+pub struct Logger;
 
 /// Global logger lock.
 static TAKEN: AtomicBool = AtomicBool::new(false);
 static mut CS_RESTORE: critical_section::RestoreState = critical_section::RestoreState::invalid();
 static mut ENCODER: defmt::Encoder = defmt::Encoder::new();
+
+impl Logger {
+    pub fn read(buf: &mut [u8]) -> usize {
+        // safety: read() is re-entrant (returning 0 if multiple readers conflict)
+        unsafe { handle().read(buf) }
+    }
+}
 
 unsafe impl defmt::Logger for Logger {
     fn acquire() {
