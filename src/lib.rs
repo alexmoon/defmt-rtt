@@ -38,6 +38,8 @@ mod consts;
 
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
+
 use crate::{channel::Channel, consts::BUF_SIZE};
 
 #[defmt::global_logger]
@@ -47,8 +49,13 @@ pub struct Logger;
 static TAKEN: AtomicBool = AtomicBool::new(false);
 static mut CS_RESTORE: critical_section::RestoreState = critical_section::RestoreState::invalid();
 static mut ENCODER: defmt::Encoder = defmt::Encoder::new();
+static SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 impl Logger {
+    pub async fn wait() {
+        SIGNAL.wait().await
+    }
+
     pub fn read(buf: &mut [u8]) -> usize {
         // safety: read() is re-entrant (returning 0 if multiple readers conflict)
         unsafe { handle().read(buf) }
@@ -83,6 +90,8 @@ unsafe impl defmt::Logger for Logger {
     unsafe fn release() {
         // safety: accessing the `static mut` is OK because we have acquired a critical section.
         ENCODER.end_frame(do_write);
+
+        SIGNAL.signal(());
 
         // safety: accessing the `static mut` is OK because we have acquired a critical section.
         TAKEN.store(false, Ordering::Relaxed);
