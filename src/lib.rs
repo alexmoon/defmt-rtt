@@ -36,7 +36,10 @@
 mod channel;
 mod consts;
 
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::{
+    ptr::addr_of_mut,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 
@@ -143,7 +146,7 @@ unsafe fn handle() -> &'static Channel {
         max_down_channels: 0,
         up_channel: Channel {
             name: &NAME as *const _ as *const u8,
-            buffer: unsafe { &mut BUFFER as *mut _ as *mut u8 },
+            buffer: unsafe { addr_of_mut!(BUFFER) as *mut u8 },
             size: BUF_SIZE,
             write: AtomicUsize::new(0),
             read: AtomicUsize::new(0),
